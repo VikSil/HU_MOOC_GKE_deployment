@@ -1,4 +1,4 @@
-name: project-v.0.4
+name: project-v.0.5
 
 on:
   push:
@@ -50,6 +50,13 @@ jobs:
 
       - name: Deploy
         run: |-
+          NAMESPACE=${GITHUB_REF#refs/heads/}
+          if [[ "$NAMESPACE" == "trunk" ]]; then
+            NAMESPACE="default"
+          fi
+          kubectl create namespace $NAMESPACE || true
+          kubectl config set-context --current --namespace=$NAMESPACE
+          kustomize edit set namespace $NAMESPACE
           kustomize edit set image PROJECT/IMAGE_APP=gcr.io/$PROJECT_ID/$IMAGE_APP:${GITHUB_REF#refs/heads/}-$GITHUB_SHA
           kustomize build . | kubectl apply -f -
           kubectl rollout status deployment $DEPLOYMENT
