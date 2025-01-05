@@ -1,9 +1,10 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  namespace: v-1-3
   name: read-random-wiki-page
 spec:
-  schedule: "0 * * * *"
+  schedule: "* * * * *"
   jobTemplate:
     spec:
       template:

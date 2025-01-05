@@ -1,4 +1,4 @@
-name: project-cron-job
+name: project-backup
 
 on:
   push:

@@ -1,7 +1,6 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  namespace: v-1-2
   name: todo-volume-claim
   labels:
     app: postgres
