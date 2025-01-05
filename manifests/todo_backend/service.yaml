@@ -9,4 +9,4 @@ spec:
   ports:
     - port: 3040
       protocol: TCP
-      targetPort: 3040
+      targetPort: 3055

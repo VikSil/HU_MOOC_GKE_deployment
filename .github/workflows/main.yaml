@@ -1,4 +1,4 @@
-name: project-v.1.0
+name: project-v.1.2
 
 on:
   push:
@@ -65,8 +65,3 @@ jobs:
           kustomize build . | kubectl apply -f -
           kubectl rollout status deployment $DEPLOYMENT
           kubectl get services -o wide
-          
-          # delete old ingress, since transitioning to a shared ingress
-          if [[ "$NAMESPACE" == "default" ]]; then
-            kubectl delete ing todo-app-ingress 
-          fi

@@ -1,18 +1,17 @@
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Extension, Json, Router};
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use http::Method;
 use reqwest::Error;
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, Row};
 use std::env;
-use std::sync::{Arc, Mutex};
+use std::error;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, FromRow, Serialize)]
 struct Todo {
-    id: u32,
+    id: i32,
     title: String,
     completed: bool,
 }
@@ -30,10 +29,26 @@ struct TodoList {
 
 #[tokio::main]
 async fn main() {
-    // Shared state for the todos
-    let todos: Arc<Mutex<Vec<Todo>>> = Arc::new(Mutex::new(vec![]));
+    let url: String = match env::var("DB_URL") {
+        Ok(val) => val,
+        Err(_e) => String::from("Environment variable DB_URL is not defined."),
+    };
+    let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
+    let migration  = match sqlx::migrate!("./migrations").run(&pool).await {
+        Ok(_data) => format!("Migration successful"),
+        Err(e) => format!("Migration failed because {}", e)
+    };
 
-    let address: String = String::from("0.0.0.0:3040");
+    println!("{}",migration);
+
+    let mut address: String = String::from("0.0.0.0:3040");
+
+    match env::var("PORT") {
+        Ok(val) => {
+            address = address.replace("3040", &val);
+        }
+        Err(_e) => println!("Environment variable PORT not defined. Using default port 3040"),
+    }
 
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST])
@@ -44,7 +59,6 @@ async fn main() {
         .route("/", get(all_ok))
         .route("/todos", get(get_todos).post(post_todo))
         .layer(ServiceBuilder::new().layer(cors))
-        .layer(Extension(todos))
         .into_make_service();
 
     let listener = tokio::net::TcpListener::bind(address).await.unwrap();
@@ -54,12 +68,16 @@ async fn main() {
     axum::serve(listener, router).await.unwrap();
 }
 
-async fn get_todos(Extension(todos): Extension<Arc<Mutex<Vec<Todo>>>>) -> impl IntoResponse {
-    replace_image().await.expect("image refresh failed");
+async fn get_todos() -> impl IntoResponse {
+    let url: String = match env::var("DB_URL") {
+        Ok(val) => val,
+        Err(_e) => String::from("Environment variable DB_URL is not defined."),
+    };
+    let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
 
-    let image_filepath: &str = "picture.txt";
+    replace_image(&pool).await.expect("image refresh failed");
 
-    let return_url: String = match fs::read_to_string(&image_filepath).await {
+    let return_url: String = match read_image(&pool).await {
         Ok(data) => data,
         Err(_) =>
             format!(
@@ -67,7 +85,7 @@ async fn get_todos(Extension(todos): Extension<Arc<Mutex<Vec<Todo>>>>) -> impl I
             ),
     };
 
-    let return_todos = todos.lock().unwrap();
+    let return_todos = read_todos(&pool).await.unwrap();
     let return_todolist = TodoList {
         todos: return_todos.clone(),
         image_url: return_url,
@@ -76,26 +94,24 @@ async fn get_todos(Extension(todos): Extension<Arc<Mutex<Vec<Todo>>>>) -> impl I
     Json(return_todolist).into_response()
 }
 
-async fn post_todo(
-    Extension(todos): Extension<Arc<Mutex<Vec<Todo>>>>,
-    Json(add_todo): Json<NewTodo>,
-) -> Json<Todo> {
-    let mut existing_todos = todos.lock().unwrap();
-    let next_id = (existing_todos.len() as u32) + 1;
-    let new_todo = Todo {
-        id: next_id,
-        title: add_todo.title,
-        completed: false,
+async fn post_todo(Json(recieved_todo): Json<NewTodo>) -> Json<Todo> {
+    let url: String = match env::var("DB_URL") {
+        Ok(val) => val,
+        Err(_e) => String::from("Environment variable DB_URL is not defined."),
     };
-    existing_todos.push(new_todo.clone());
+    let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
+
+    let add_todo = NewTodo {
+        title: recieved_todo.title,
+    };
+    let new_todo = writetodo(add_todo, &pool).await.unwrap();
+
     Json(new_todo)
 }
 
-async fn replace_image() -> Result<(), Error> {
-    let image_filepath: &str = "/usr/local/files/picture.txt";
-    let time_filepath: &str = "/usr/local/files/timestamp.txt";
-    let previous_time: u64 = match fs::read_to_string(&time_filepath).await {
-        Ok(data) => data.parse::<u64>().unwrap(),
+async fn replace_image(pool: &sqlx::PgPool) -> Result<(), Error> {
+    let previous_time: u64 = match read_time(&pool).await {
+        Ok(data) => data,
         Err(_) => 0,
     };
 
@@ -117,17 +133,9 @@ async fn replace_image() -> Result<(), Error> {
         match reqwest::get(url).await {
             Ok(response) => {
                 if response.status().is_success() {
-                    let mut image_file = fs::File::create(image_filepath).await.unwrap();
-                    image_file
-                        .write_all(response.url().to_string().as_bytes())
+                    write_time_and_url(current_time, &response.url().to_string(), &pool)
                         .await
-                        .expect("Error while saving image url");
-
-                    let mut time_file = fs::File::create(time_filepath).await.unwrap();
-                    time_file
-                        .write_all(current_time.to_string().as_bytes())
-                        .await
-                        .expect("Error while saving timestamp");
+                        .unwrap();
                 }
             }
             Err(e) => eprintln!("Request error: {}", e),
@@ -136,6 +144,75 @@ async fn replace_image() -> Result<(), Error> {
     Ok(())
 }
 
+async fn read_todos(pool: &sqlx::PgPool) -> Result<Vec<Todo>, Box<dyn error::Error>> {
+    let q = "SELECT * FROM todolist";
+    let query = sqlx::query(q);
+
+    let rows = query.fetch_all(pool).await.unwrap();
+
+    let todolist = rows
+        .iter()
+        .map(|row| Todo {
+            id: row.get("id"),
+            title: row.get("title"),
+            completed: row.get("completed"),
+        })
+        .collect();
+
+    Ok(todolist)
+}
+
+async fn writetodo(todo: NewTodo, pool: &sqlx::PgPool) -> Result<Todo, Box<dyn error::Error>> {
+    let query = "INSERT INTO todolist (title,completed) VALUES ($1,$2) RETURNING *";
+
+    match sqlx::query_as::<_, Todo>(query)
+        .bind(&todo.title)
+        .bind(false)
+        .fetch_one(pool)
+        .await
+    {
+        Ok(new_todo) => Ok(new_todo),
+        Err(e) => Err(Box::new(e)),
+    }
+}
+
+async fn read_time(pool: &sqlx::PgPool) -> Result<u64, Box<dyn error::Error>> {
+    let q = "SELECT time FROM image WHERE id = 1";
+    let query = sqlx::query(q);
+
+    let row = query.fetch_one(pool).await.unwrap();
+    let time: i64 = row.get("time");
+    let converted_time = time as u64;
+
+    Ok(converted_time)
+}
+
+async fn read_image(pool: &sqlx::PgPool) -> Result<String, Box<dyn error::Error>> {
+    let q = "SELECT url FROM image WHERE id = 1";
+    let query = sqlx::query(q);
+
+    let row = query.fetch_one(pool).await.unwrap();
+    let url: String = row.get("url");
+
+    Ok(url)
+}
+
+async fn write_time_and_url(
+    time: u64,
+    url: &str,
+    pool: &sqlx::PgPool,
+) -> Result<(), Box<dyn error::Error>> {
+    let query = "UPDATE image SET time = $1, url = $2 WHERE id = 1";
+
+    sqlx::query(query)
+        .bind(time as i64)
+        .bind(url)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    Ok(())
+}
 
 async fn all_ok()  -> impl IntoResponse  {
     println!("Received a diagnostic request");

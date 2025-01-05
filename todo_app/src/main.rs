@@ -1,5 +1,7 @@
+use gloo_console::log;
 use reqwasm::http::Request;
 use serde::{Deserialize, Serialize};
+use std::env;
 use yew::prelude::*;
 use yew::use_effect_with;
 
