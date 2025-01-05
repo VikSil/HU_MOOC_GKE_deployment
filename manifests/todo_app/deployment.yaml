@@ -31,5 +31,3 @@ spec:
           - name: todo-app-volume
             mountPath: /usr/local/files
             subPath: postgres
-      
-
