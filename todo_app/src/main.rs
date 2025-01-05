@@ -1,132 +1,149 @@
-use axum::{ response::{ Html, IntoResponse }, Router, routing::get };
-use reqwest::Error;
-use std::env;
-use std::time::{ SystemTime, UNIX_EPOCH };
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
-use tower_http::services::ServeDir;
+use reqwasm::http::Request;
+use serde::{Deserialize, Serialize};
+use yew::prelude::*;
+use yew::use_effect_with;
 
-#[tokio::main]
-async fn main() {
-    let mut address: String = String::from("0.0.0.0:3030");
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+struct Todo {
+    pub id: i32,
+    pub title: String,
+    pub completed: bool,
+}
 
-    match env::var("PORT") {
-        Ok(val) => {
-            address = address.replace("3030", &val);
-        }
-        Err(_e) => println!("Environment variable PORT not defined. Using default port 3030"),
+#[derive(Serialize, Deserialize, Debug)]
+struct NewTodo {
+    pub title: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TodoList {
+    pub todos: Vec<Todo>,
+    pub image_url: String,
+}
+
+#[derive(PartialEq, Properties)]
+struct TodoComponentProps {
+    pub todo: Todo,
+}
+
+#[function_component(TodoComponent)]
+fn todo_component(props: &TodoComponentProps) -> Html {
+    let TodoComponentProps { todo } = props;
+    html! {
+        { todo.title.to_owned() }
+    }
+}
+
+#[function_component(App)]
+fn page_body() -> Html {
+    let input_value = use_state(|| String::new());
+    let refresh_flag = use_state(|| false);
+    let todolist: UseStateHandle<Option<TodoList>> = use_state(|| None);
+
+    let form_oninput = {
+        let input_value = input_value.clone();
+        Callback::from(move |e: InputEvent| {
+            if let Some(input) = e.target_dyn_into::<web_sys::HtmlInputElement>() {
+                input_value.set(input.value());
+            }
+        })
+    };
+
+    let form_onsubmit = {
+        let input_value = input_value.clone();
+        let refresh_flag = refresh_flag.clone();
+
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+
+            let new_todo = NewTodo {
+                title: String::from(input_value.as_str()),
+            };
+
+            let mut todos_url: String = format!("http://");
+            let host = env!("BACKEND_HOST");
+            todos_url = todos_url + host + "/todos";
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let data_serialized = serde_json::to_string_pretty(&new_todo).unwrap();
+
+                let _request = Request::post(&todos_url)
+                    .header("Content-Type", "application/json")
+                    .body(wasm_bindgen::JsValue::from(&data_serialized))
+                    .send()
+                    .await
+                    .unwrap()
+                    .text()
+                    .await
+                    .unwrap();
+            });
+            input_value.set(String::from(""));
+            refresh_flag.set(!*refresh_flag);
+        })
+    };
+
+    {
+        let mut todos_url: String = format!("http://");
+        let host = env!("BACKEND_HOST");
+        todos_url = todos_url + host + "/todos";
+
+        let todolist = todolist.clone();
+        use_effect_with(refresh_flag, move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                let fetched_todos: TodoList = Request::get(&todos_url)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+
+                todolist.set(Some(fetched_todos));
+            });
+        });
     }
 
-    let router = Router::new()
-        .nest_service("/usr/local/files", ServeDir::new("/usr/local/files"))
-        .route("/", get(index));
-
-    println!("Server started on port {}", &address);
-
-    axum::Server::bind(&address.parse().unwrap()).serve(router.into_make_service()).await.unwrap()
-}
-
-async fn index() -> impl IntoResponse {
-    replace_image().await.expect("Image download failed");
-
-    Html(
-        r#"
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Todo App</title>
-        <style>
-            .center-image {
-                display: block;
-                margin-left: auto;
-                margin-right: auto;
-            }
-            div {
-                text-align: center;
-                margin: 10px 0px;
-            }
-            ul {
-                display: inline-block;
-                text-align: left;
-                margin: 0px;
-            }
-        </style>
-    </head>
-    <body>
+    html! {
         <div>
-            <img src="/usr/local/files/picture.jpg" alt="Random picture" width="300" class="center-image">
-        </div>
-        <div>
-            <form>
-                <input type="text" maxlength="140">
-                <input type="submit" value="Create TODO">
-            </form>
-        </div>
-        <div>
-            <ul>
-                <li>TODO 1</li>
-                <li>TODO 1</li>
-            </ul>
-        </div>        
-    </body>
-    </html>
-"#
-    )
-}
-
-async fn download_image() -> Result<(), Error> {
-    let url = "https://picsum.photos/1200";
-    let file_path = "/usr/local/files/picture.jpg";
-
-    match reqwest::get(url).await {
-        Ok(response) => {
-            if response.status().is_success() {
-                match response.bytes().await {
-                    Ok(content) => {
-                        let mut file = fs::File
-                            ::create(file_path).await
-                            .expect("Failed to create file");
-                        file.write_all(&content).await.expect("Failed to update image");
+            <div>
+                <img src={
+                    match todolist.as_ref() {
+                        Some(tdl) => tdl.image_url.clone(),
+                        None => String::from("https://fastly.picsum.photos/id/633/1200/1200.jpg?hmac=w3wSzGHuyT-aMKInisjPvciLC7gIgyXaBAeU7nzo-c4")
                     }
-                    Err(e) => eprintln!("Error getting picture: {}", e),
+                } alt="Random picture" width="300" class="center-image" />
+            </div>
+            <div>
+            <form onsubmit={form_onsubmit}>
+                <input
+                    type="text" maxlength = "140"
+                    value={(*input_value).clone()}
+                    oninput={form_oninput}/>
+                <input type="submit" value="Create TODO" />
+            </form>
+            </div>
+            <div>
+            <ul>
+                {
+                match todolist.as_ref() {
+                    Some(tdl) => tdl
+                        .todos.iter().map(|todo| {
+                            html! {
+                                <li>
+                                <TodoComponent todo={todo.clone()}/>
+                                </li>
+                            }
+                        })
+                        .collect(),
+                    None =>{html! {<>{"No data yet"}</>} },
                 }
-            } else {
-                eprintln!("Request failed with status: {}", response.status());
             }
-        }
-        Err(e) => eprintln!("Request error: {}", e),
+            </ul>
+            </div>
+        </div>
     }
-
-    println!("Image successfully downloaded to {}", file_path);
-    Ok(())
 }
 
-async fn replace_image() -> Result<(), Error> {
-    let filepath: &str = "/usr/local/files/timestamp.txt";
-    let previous_time: u64 = match fs::read_to_string(&filepath).await {
-        Ok(data) => data.parse::<u64>().unwrap(),
-        Err(_) => 0,
-    };
-
-    let timeout: u64 = match env::var("TIMEOUT") {
-        Ok(val) => val.parse::<u64>().unwrap(),
-        Err(_e) => 3600, // by default serve a new image every hour
-    };
-
-    let now = SystemTime::now();
-    // Get time since start of eposh in seconds
-    let current_time = now.duration_since(UNIX_EPOCH).expect("Time malfunctioned").as_secs();
-
-    if previous_time + timeout < current_time {
-        download_image().await.expect("Image download failed");
-        //write the current count to file
-        let mut file = fs::File::create(&"/usr/local/files/timestamp.txt").await.unwrap();
-        file.write_all(current_time.to_string().as_bytes()).await.expect(
-            "Error while saving current timestamp"
-        );
-    } else {
-        println!("Serving the same image");
-    }
-
-    Ok(())
+fn main() {
+    yew::Renderer::<App>::new().render();
 }

@@ -31,5 +31,4 @@
 /static
 LICENSE
 README.md
-/dist
-/img
+*.txt
