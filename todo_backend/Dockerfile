@@ -13,9 +13,7 @@ FROM rust:alpine3.21
 
 WORKDIR /usr/local/bin
 
+COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/target/release/todo_backend .
-
-RUN mkdir /usr/local/files && chmod -R 664 /usr/local/files && \ 
-    chown -R root:root /usr/local/files && chmod g+s /usr/local/files
 
 CMD ["./todo_backend"]

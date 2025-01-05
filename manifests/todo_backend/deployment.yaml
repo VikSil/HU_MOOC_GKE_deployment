@@ -7,6 +7,8 @@ spec:
   selector:
     matchLabels:
       app: todo-backend
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
@@ -15,3 +17,14 @@ spec:
       containers:
         - name: todo-backend
           image: PROJECT/IMAGE_BACKEND
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: todo-cfgmap
+                  key: port
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: todo-secret
+                  key: DB_URL  
