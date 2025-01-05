@@ -7,6 +7,6 @@ spec:
   selector:
     app: todo-backend
   ports:
-    - port: 3055
+    - port: 3040
       protocol: TCP
       targetPort: 3055

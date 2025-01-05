@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - manifests/todo_app/deployment.yaml
   - manifests/todo_app/service.yaml
-  - manifests/todo_app/configmap.yaml
+  - manifests/todo_app/configmap.yaml   
   - manifests/todo_backend/configmap.yaml
   - manifests/todo_backend/deployment.yaml
   - manifests/todo_backend/service.yaml
@@ -12,5 +12,3 @@ resources:
   - postgres_pod/service.yaml
   - postgres_pod/statefulset.yaml
   - postgres_pod/volumeclaim.yaml
-  - manifests/configmap.yaml
-  - manifests/cronjob.yaml
