@@ -1,6 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
+  namespace: v-1-2
   name: postgres
 spec:
   serviceName: postgres
