@@ -1,21 +1,16 @@
 # Build stage
-FROM rust:alpine3.21 as builder
+FROM rust:slim-buster as builder
 
 WORKDIR /app
 
 COPY . . 
 
-RUN apk add openssl-dev musl-dev 
-RUN RUSTFLAGS="-Ctarget-feature=-crt-static" cargo build --release
+RUN apt-get --yes update && apt-get --yes install pkg-config libssl-dev
+RUN cargo install --locked trunk
+RUN rustup target add wasm32-unknown-unknown
 
-# Production stage
-FROM rust:alpine3.21
+RUN PORT="${PORT:-3030}"
 
-WORKDIR /usr/local/bin
+EXPOSE $PORT
 
-COPY --from=builder /app/target/release/todo_app .
-
-RUN mkdir /usr/local/files && chmod -R 664 /usr/local/files && \ 
-    chown -R root:root /usr/local/files && chmod g+s /usr/local/files
-
-CMD ["./todo_app"]
+CMD trunk serve --port $PORT
