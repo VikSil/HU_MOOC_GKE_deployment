@@ -17,6 +17,10 @@ spec:
       containers:
         - name: todo-backend
           image: PROJECT/IMAGE_BACKEND
+          resources:
+            limits:
+              cpu: "50m"
+              memory: "50Mi"
           env:
             - name: PORT
               valueFrom:

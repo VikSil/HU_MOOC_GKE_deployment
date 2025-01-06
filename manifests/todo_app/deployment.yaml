@@ -15,6 +15,10 @@ spec:
       containers:
         - name: todo-app
           image: PROJECT/IMAGE_APP
+          resources:
+            limits:
+              cpu: "800m"
+              memory: "500Mi"
           env:
           - name: PORT
             value: "8088"
