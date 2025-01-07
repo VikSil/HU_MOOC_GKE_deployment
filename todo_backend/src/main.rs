@@ -33,13 +33,14 @@ async fn main() {
         Ok(val) => val,
         Err(_e) => String::from("Environment variable DB_URL is not defined."),
     };
+
     let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
-    let migration  = match sqlx::migrate!("./migrations").run(&pool).await {
+    let migration = match sqlx::migrate!("./migrations").run(&pool).await {
         Ok(_data) => format!("Migration successful"),
-        Err(e) => format!("Migration failed because {}", e)
+        Err(e) => format!("Migration failed because {}", e),
     };
 
-    println!("{}",migration);
+    println!("{}", migration);
 
     let mut address: String = String::from("0.0.0.0:3040");
 
@@ -69,6 +70,8 @@ async fn main() {
 }
 
 async fn get_todos() -> impl IntoResponse {
+    println!("Received a GET request");
+
     let url: String = match env::var("DB_URL") {
         Ok(val) => val,
         Err(_e) => String::from("Environment variable DB_URL is not defined."),
@@ -94,19 +97,28 @@ async fn get_todos() -> impl IntoResponse {
     Json(return_todolist).into_response()
 }
 
-async fn post_todo(Json(recieved_todo): Json<NewTodo>) -> Json<Todo> {
+async fn post_todo(Json(recieved_todo): Json<NewTodo>) -> impl IntoResponse {
+    println!("Received a POST request");
+
     let url: String = match env::var("DB_URL") {
         Ok(val) => val,
         Err(_e) => String::from("Environment variable DB_URL is not defined."),
     };
     let pool = sqlx::postgres::PgPool::connect(&url).await.unwrap();
 
-    let add_todo = NewTodo {
-        title: recieved_todo.title,
-    };
-    let new_todo = writetodo(add_todo, &pool).await.unwrap();
+    let title = recieved_todo.title;
 
-    Json(new_todo)
+    if title.len() <= 140 {
+        println!("Valid request, new TODO: {}", title);
+
+        let add_todo = NewTodo { title: title };
+        let new_todo = writetodo(add_todo, &pool).await.unwrap();
+
+        Json(new_todo).into_response()
+    } else {
+        println!("Invalid request, TODO too long: {}", title);
+        (StatusCode::BAD_REQUEST, "Invalid request data").into_response()
+    }
 }
 
 async fn replace_image(pool: &sqlx::PgPool) -> Result<(), Error> {
@@ -128,6 +140,7 @@ async fn replace_image(pool: &sqlx::PgPool) -> Result<(), Error> {
         .as_secs();
 
     if previous_time + timeout < current_time {
+        println!("Time to change the picture");
         let url = "https://picsum.photos/1200";
 
         match reqwest::get(url).await {
@@ -211,11 +224,13 @@ async fn write_time_and_url(
         .await
         .unwrap();
 
+    println!("New picture URL: {}", url);
+
     Ok(())
 }
 
-async fn all_ok()  -> impl IntoResponse  {
+async fn all_ok() -> impl IntoResponse {
     println!("Received a diagnostic request");
 
-    (StatusCode::OK,"All is OK").into_response()
+    (StatusCode::OK, "All is OK").into_response()
 }
